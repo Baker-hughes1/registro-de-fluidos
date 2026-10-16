@@ -309,6 +309,49 @@ body{
   border-radius:9px; padding:7px 11px; font-size:12px; font-weight:700; cursor:pointer; flex-shrink:0;
 }
 .logout-btn:active{transform:scale(.96);}
+.cat-grid{display:grid; grid-template-columns:1fr; gap:14px;}
+@media(min-width:820px){ .cat-grid{grid-template-columns:minmax(0,5fr) minmax(0,6fr);} .cat-grid .card{margin-bottom:0;} }
+.cat-add{display:flex; gap:8px; align-items:flex-start;}
+.cat-add .search-box{flex:1; margin-bottom:12px;}
+.cat-add-btn{padding:10px 14px; font-size:13px; white-space:nowrap;}
+.cat-list{display:flex; flex-direction:column; gap:6px; max-height:60vh; overflow-y:auto;}
+.cat-item{display:flex; align-items:center; gap:8px; padding:9px 10px; border:1.5px solid var(--border); border-radius:11px; background:var(--bg-elev); cursor:default; flex-wrap:wrap;}
+.cat-item[data-action="cat-sel"]{cursor:pointer;}
+.cat-item[data-action="cat-sel"]:hover{border-color:var(--accent);}
+.cat-item.sel{border-color:var(--accent); background:var(--accent-soft);}
+.cat-item.off .nm{color:var(--text-faint); text-decoration:line-through;}
+.cat-name{display:flex; align-items:center; gap:10px; flex:1; min-width:140px;}
+.cat-name .nm{font-size:13.5px; font-weight:700;}
+.cat-name .meta{font-size:11px; color:var(--text-faint);}
+.cat-av{width:32px; height:32px; font-size:12px; flex-shrink:0;}
+.cat-badge{font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; color:var(--warn); background:var(--warn-soft); padding:3px 7px; border-radius:6px;}
+.cat-mini{border:1.5px solid var(--border); background:var(--bg-sunken); color:var(--text); border-radius:8px; padding:5px 10px; font-size:12px; font-weight:700; cursor:pointer; font-family:inherit;}
+.cat-mini:hover{border-color:var(--accent);}
+.cat-mini.ok{background:var(--accent); border-color:var(--accent); color:#fff;}
+.cat-edit{flex:1; min-width:140px; padding:7px 10px; border-radius:8px; border:1.5px solid var(--accent); background:var(--bg-sunken); color:var(--text); font-size:13.5px; font-family:inherit;}
+.cat-foot{font-size:11.5px; color:var(--text-faint); text-align:center; margin-top:10px;}
+.imp-head{display:flex; justify-content:space-between; align-items:flex-start; gap:10px;}
+.imp-steps{display:grid; grid-template-columns:1fr; gap:10px; margin-bottom:14px;}
+@media(min-width:640px){ .imp-steps{grid-template-columns:1fr 1fr;} }
+.imp-step{display:flex; gap:12px; padding:12px; border:1px dashed var(--border-strong); border-radius:12px; font-size:13px;}
+.imp-step .meta{font-size:11.5px; color:var(--text-faint); margin:3px 0 10px;}
+.imp-num{width:26px; height:26px; border-radius:50%; background:var(--accent-soft); color:var(--accent-strong); font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:13px;}
+.imp-btn{padding:9px 14px; font-size:13px;}
+.imp-file{position:relative; overflow:hidden;}
+.imp-file input{position:absolute; inset:0; opacity:0; cursor:pointer;}
+.imp-file-name{font-size:12.5px; color:var(--text-dim); margin-bottom:10px;}
+.imp-kpis{grid-template-columns:repeat(3,1fr) !important;}
+.imp-note{font-size:11.5px; color:var(--text-faint); margin:6px 0 10px;}
+.imp-table-wrap{overflow-x:auto; border:1px solid var(--border); border-radius:10px; max-height:420px; overflow-y:auto;}
+.imp-table{width:100%; border-collapse:collapse; font-size:12px;}
+.imp-table th{position:sticky; top:0; background:var(--bg-sunken); text-align:left; padding:8px; font-size:11px; text-transform:uppercase; letter-spacing:.3px; color:var(--text-faint);}
+.imp-table td{padding:7px 8px; border-top:1px solid var(--border); vertical-align:top; white-space:nowrap;}
+.imp-table td.det{white-space:normal; min-width:220px; color:var(--text-dim);}
+.imp-table tr.error td.det{color:var(--danger);}
+.imp-st{font-weight:800; font-size:11px; padding:2px 7px; border-radius:6px;}
+.imp-st.ok{color:var(--ok); background:var(--ok-soft);}
+.imp-st.dup{color:var(--warn); background:var(--warn-soft);}
+.imp-st.err{color:var(--danger); background:var(--danger-soft);}
 </style>
 </head>
 <body>
@@ -389,6 +432,8 @@ var STATE = {
     prop: 'pv_plastic_viscosity',
     prod: 'sulfatrol'
   },
+  cat: { sel:null, newCliente:'', newPozo:'', pozoFilter:'', editing:null, editValue:'', busyMsg:'' },
+  imp: { open:false, busy:'', fileName:'', rows:[], fatal:'', ignored:[], result:null, showAll:false },
   hist: {
     records: [],
     loaded: false,
@@ -461,6 +506,7 @@ function initCapabilities(){
   });
   HIST_POLL_TIMER = setInterval(function(){
     if(STATE.user && (STATE.tab==='historial' || STATE.tab==='dashboard')) subscribeHistorial();
+    if(STATE.user && hasRole() && Date.now()-CAT.lastLoad > 60000) loadCatalog();
   }, 15000); // refresco cada 15s para reflejar cambios de otros dispositivos
 }
 
@@ -474,7 +520,7 @@ function applySession(session){
     var meta = session.user.app_metadata || {};
     STATE.user = {email: session.user.email, role: meta.role || null};
     if(STATE.tab==='dashboard' && STATE.user.role!=='admin') STATE.tab = 'captura';
-    if(hasRole()) subscribeHistorial();
+    if(hasRole()){ subscribeHistorial(); loadCatalog(); }
   } else {
     STATE.user = null;
     STATE.hist.records = [];
@@ -551,9 +597,10 @@ function renderAll(){
   } else if(!hasRole()){
     body = renderNoRole();
   } else {
-    if(STATE.tab==='dashboard' && !isAdmin()) STATE.tab = 'captura';
+    if((STATE.tab==='dashboard' || STATE.tab==='catalogo') && !isAdmin()) STATE.tab = 'captura';
     if(STATE.tab==='captura') body = renderCaptura();
     else if(STATE.tab==='historial') body = renderHistorial();
+    else if(STATE.tab==='catalogo') body = renderCatalogo();
     else body = renderDashboard();
   }
   root.innerHTML = renderTopbar() + '<div class="app"><div class="wrap">' + body + '</div></div>';
@@ -605,6 +652,7 @@ function renderTopbar(){
       '<button class="tab-btn ' + (STATE.tab==='captura'?'active':'') + '" data-action="tab" data-tab="captura">📝 Captura</button>' +
       '<button class="tab-btn ' + (STATE.tab==='historial'?'active':'') + '" data-action="tab" data-tab="historial">📋 Registro</button>' +
       (isAdmin() ? '<button class="tab-btn ' + (STATE.tab==='dashboard'?'active':'') + '" data-action="tab" data-tab="dashboard">📊 Dashboard</button>' : '') +
+      (isAdmin() ? '<button class="tab-btn ' + (STATE.tab==='catalogo'?'active':'') + '" data-action="tab" data-tab="catalogo">🗂️ Catálogo</button>' : '') +
     '</div>';
   }
   var logout = remote ? '<button class="logout-btn" data-action="logout" title="Cerrar sesión">Salir</button>' : '';
@@ -879,13 +927,12 @@ function renderDashboard(){
     '<span>📊</span><div style="flex:1;">Dashboard basado en la matriz de plan de perforación (CLIA 46) comparado contra los registros del histórico. Usa los filtros para ver la comparación plan vs. real por sección, departamento, cliente, pozo o rango de fechas.</div></div>';
 
   var d = STATE.dash;
-  var pozoOpts = d.cliente ? (POZOS[d.cliente]||[]) : pozos.map(function(p){ return p.pozo; });
-  pozoOpts = pozoOpts.filter(function(p,i){ return pozoOpts.indexOf(p)===i; });
+  var pozoOpts = filterPozos(d.cliente);
   var hasDashFilters = d.cliente || d.pozo || d.seccion || d.depto || d.from || d.to;
   html += '<div class="filters-card dash-filters">' +
     '<label class="grow">Sección<select id="d-seccion"><option value="">Todas</option>'+optList(distinctValues('hole_section'), d.seccion)+'</select></label>' +
     '<label class="grow">Departamento<select id="d-depto"><option value="">Todos</option>'+optList(distinctValues('departamento'), d.depto)+'</select></label>' +
-    '<label class="grow">Cliente<select id="d-cliente"><option value="">Todos</option>'+optList(CLIENTES, d.cliente)+'</select></label>' +
+    '<label class="grow">Cliente<select id="d-cliente"><option value="">Todos</option>'+optList(filterClientes(), d.cliente)+'</select></label>' +
     '<label class="grow">Pozo<select id="d-pozo"><option value="">Todos</option>'+optList(pozoOpts, d.pozo)+'</select></label>' +
     '<label>Desde<input type="date" id="d-from" value="'+esc(d.from)+'"></label>' +
     '<label>Hasta<input type="date" id="d-to" value="'+esc(d.to)+'"></label>' +
@@ -1073,12 +1120,13 @@ function renderHistorial(){
   if(!cap.connected){
     html += '<div class="banner banner-warn">⚠️ No hay conexión a la base de datos compartida (Supabase). Mostrando solo registros guardados en este dispositivo. Revisa que SUPABASE_URL y SUPABASE_ANON_KEY estén bien configurados en el archivo — ver SETUP.md.</div>';
   }
+  if(STATE.imp.open) html += renderImportPanel();
   var recs = getFilteredRecords();
   html += '<div class="filters-card">';
   html += '<select class="grow" id="f-cliente"><option value="">Todos los clientes</option>' +
-    CLIENTES.map(function(c){ return '<option value="'+esc(c)+'" '+(STATE.hist.filterCliente===c?'selected':'')+'>'+esc(c)+'</option>'; }).join('') +
+    filterClientes().map(function(c){ return '<option value="'+esc(c)+'" '+(STATE.hist.filterCliente===c?'selected':'')+'>'+esc(c)+'</option>'; }).join('') +
     '</select>';
-  var pozoOpts = STATE.hist.filterCliente ? (POZOS[STATE.hist.filterCliente]||[]) : Array.prototype.concat.apply([], CLIENTES.map(function(c){return POZOS[c]||[];}));
+  var pozoOpts = filterPozos(STATE.hist.filterCliente);
   html += '<select class="grow" id="f-pozo"><option value="">Todos los pozos</option>' +
     pozoOpts.map(function(p){ return '<option value="'+esc(p)+'" '+(STATE.hist.filterPozo===p?'selected':'')+'>'+esc(p)+'</option>'; }).join('') +
     '</select>';
@@ -1092,6 +1140,7 @@ function renderHistorial(){
     '<span style="font-size:12.5px;color:var(--text-faint);font-weight:600;">'+recs.length+' registro'+(recs.length!==1?'s':'')+(hasFilters?' (filtrados)':' (todos)')+'</span>' +
     '<div style="display:flex;gap:8px;">' +
     (hasFilters? '<button class="btn btn-ghost" style="padding:8px 14px;font-size:12.5px;" data-action="clear-filters">✕ Limpiar filtros</button>' : '') +
+    (STATE.imp.open ? '' : '<button class="btn btn-ghost" style="padding:8px 14px;font-size:12.5px;" data-action="imp-open">⬆ Importar Excel</button>') +
     '<button class="btn btn-primary" style="padding:8px 14px;font-size:12.5px;" data-action="export-xlsx">⬇ Exportar a Excel</button>' +
     '</div>' +
   '</div>';
@@ -1387,8 +1436,722 @@ function restoreDraftState(){
   if(STATE.step<2) STATE.step=2;
 }
 
+/* ======================================================================
+   MÓDULO: CATÁLOGO DE CLIENTES Y POZOS (administrable)
+   Tablas en Supabase: clientes(id, nombre, activo) y pozos(id, cliente_id, nombre, activo).
+   Si las tablas aún no existen, la app usa el listado incluido en este archivo.
+   ====================================================================== */
+var CAT = { loaded:false, source:'embedded', dbMissing:false, clientes:[], pozos:[], lastLoad:0, busy:false };
+var ALL_CLIENTES = [];   // incluye inactivos (para filtros e histórico)
+var ALL_POZOS = {};
+var CAT_LOCAL_KEY = 'catalogo_local_v1';
+
+function catNorm(s){
+  return String(s===undefined||s===null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+}
+function catSort(a,b){ return a.nombre.localeCompare(b.nombre,'es',{numeric:true}); }
+
+function catalogFromEmbedded(){
+  var clientes = [], pozos = [];
+  DATA.clientesPozos.clientes.forEach(function(c, i){
+    var cid = 'emb-c'+i;
+    clientes.push({id:cid, nombre:c, activo:true});
+    (DATA.clientesPozos.pozos[c]||[]).forEach(function(p, j){ pozos.push({id:'emb-p'+i+'-'+j, cliente_id:cid, nombre:p, activo:true}); });
+  });
+  return {clientes:clientes, pozos:pozos};
+}
+
+function rebuildCatalogGlobals(){
+  var cl = CAT.clientes.slice().sort(catSort);
+  var byId = {};
+  cl.forEach(function(c){ byId[c.id]=c; });
+  var act = [], all = [], pAct = {}, pAll = {};
+  cl.forEach(function(c){ all.push(c.nombre); pAll[c.nombre]=[]; if(c.activo){ act.push(c.nombre); pAct[c.nombre]=[]; } });
+  CAT.pozos.slice().sort(catSort).forEach(function(p){
+    var c = byId[p.cliente_id]; if(!c) return;
+    pAll[c.nombre].push(p.nombre);
+    if(c.activo && p.activo) pAct[c.nombre].push(p.nombre);
+  });
+  CLIENTES = act; POZOS = pAct; ALL_CLIENTES = all; ALL_POZOS = pAll;
+}
+
+/* Opciones para filtros: catálogo completo + nombres que aparezcan en registros antiguos */
+function filterClientes(){
+  var seen = {}, out = [];
+  ALL_CLIENTES.concat(STATE.hist.records.map(function(r){ return r.cliente; })).forEach(function(c){ if(c && !seen[c]){ seen[c]=1; out.push(c); } });
+  return out.sort(function(a,b){ return a.localeCompare(b,'es',{numeric:true}); });
+}
+function filterPozos(cliente){
+  var seen = {}, out = [];
+  var base = cliente ? (ALL_POZOS[cliente]||[]) : Array.prototype.concat.apply([], ALL_CLIENTES.map(function(c){ return ALL_POZOS[c]||[]; }));
+  var fromRecs = STATE.hist.records.filter(function(r){ return !cliente || r.cliente===cliente; }).map(function(r){ return r.pozo; });
+  base.concat(fromRecs).forEach(function(p){ if(p && !seen[p]){ seen[p]=1; out.push(p); } });
+  return out.sort(function(a,b){ return a.localeCompare(b,'es',{numeric:true}); });
+}
+
+function saveLocalCatalog(){
+  try{ localStorage.setItem(CAT_LOCAL_KEY, JSON.stringify({clientes:CAT.clientes, pozos:CAT.pozos})); }catch(e){}
+}
+
+function loadCatalog(force){
+  if(CAT.busy) return Promise.resolve();
+  if(!supabase){
+    var stored = null;
+    try{ stored = JSON.parse(localStorage.getItem(CAT_LOCAL_KEY)||'null'); }catch(e){}
+    var src = stored || catalogFromEmbedded();
+    CAT.clientes = src.clientes; CAT.pozos = src.pozos; CAT.source = 'local'; CAT.loaded = true; CAT.lastLoad = Date.now();
+    rebuildCatalogGlobals();
+    return Promise.resolve();
+  }
+  if(!STATE.user) return Promise.resolve();
+  CAT.busy = true;
+  var before = JSON.stringify([CAT.clientes, CAT.pozos]);
+  return Promise.all([
+    supabase.from('clientes').select('id,nombre,activo').limit(5000),
+    supabase.from('pozos').select('id,cliente_id,nombre,activo').limit(20000)
+  ]).then(function(res){
+    var err = res[0].error || res[1].error;
+    if(err){
+      console.warn('catálogo:', err);
+      CAT.dbMissing = true; CAT.source = 'embedded';
+      if(!CAT.loaded){ var e = catalogFromEmbedded(); CAT.clientes = e.clientes; CAT.pozos = e.pozos; }
+    } else if((res[0].data||[]).length===0){
+      CAT.dbMissing = false; CAT.source = 'empty';
+      var e2 = catalogFromEmbedded(); CAT.clientes = e2.clientes; CAT.pozos = e2.pozos;
+    } else {
+      CAT.dbMissing = false; CAT.source = 'db';
+      CAT.clientes = res[0].data; CAT.pozos = res[1].data||[];
+    }
+    CAT.loaded = true; CAT.lastLoad = Date.now();
+    rebuildCatalogGlobals();
+    var changed = before !== JSON.stringify([CAT.clientes, CAT.pozos]);
+    if(changed && canRerenderForCatalog()) renderAll();
+  }).catch(function(e){ console.warn(e); }).then(function(){ CAT.busy = false; });
+}
+
+function canRerenderForCatalog(){
+  var a = document.activeElement;
+  if(a && (a.tagName==='INPUT' || a.tagName==='TEXTAREA' || a.tagName==='SELECT')) return false;
+  if(STATE.tab==='captura') return STATE.step < 2;
+  if(STATE.tab==='catalogo') return !STATE.cat.editing;
+  return STATE.tab==='historial' || STATE.tab==='dashboard';
+}
+
+function catWritable(){
+  return !supabase || CAT.source==='db';
+}
+function catErr(msg){ showToast(msg, 'err'); return Promise.resolve(false); }
+
+function findCliente(id){ return CAT.clientes.find(function(c){ return c.id===id; }); }
+function findPozo(id){ return CAT.pozos.find(function(p){ return p.id===id; }); }
+
+function addCliente(nombre){
+  nombre = String(nombre||'').trim().replace(/\s+/g,' ');
+  if(!nombre) return catErr('Escribe el nombre del cliente');
+  if(CAT.clientes.some(function(c){ return catNorm(c.nombre)===catNorm(nombre); })) return catErr('Ya existe un cliente con ese nombre');
+  if(!supabase){
+    CAT.clientes.push({id:slugRandom(), nombre:nombre, activo:true}); saveLocalCatalog(); rebuildCatalogGlobals();
+    return Promise.resolve(true);
+  }
+  return supabase.from('clientes').insert({nombre:nombre}).select('id,nombre,activo').then(function(res){
+    if(res.error) return catErr('No se pudo crear el cliente: '+res.error.message);
+    CAT.clientes.push(res.data[0]); rebuildCatalogGlobals(); return true;
+  });
+}
+
+function addPozo(clienteId, nombre){
+  nombre = String(nombre||'').trim().replace(/\s+/g,' ');
+  if(!clienteId) return catErr('Selecciona un cliente');
+  if(!nombre) return catErr('Escribe el nombre del pozo');
+  if(CAT.pozos.some(function(p){ return p.cliente_id===clienteId && catNorm(p.nombre)===catNorm(nombre); })) return catErr('Ese pozo ya existe para este cliente');
+  if(!supabase){
+    CAT.pozos.push({id:slugRandom(), cliente_id:clienteId, nombre:nombre, activo:true}); saveLocalCatalog(); rebuildCatalogGlobals();
+    return Promise.resolve(true);
+  }
+  return supabase.from('pozos').insert({cliente_id:clienteId, nombre:nombre}).select('id,cliente_id,nombre,activo').then(function(res){
+    if(res.error) return catErr('No se pudo crear el pozo: '+res.error.message);
+    CAT.pozos.push(res.data[0]); rebuildCatalogGlobals(); return true;
+  });
+}
+
+/* Renombrar también actualiza los registros históricos, para que no queden huérfanos */
+function renameRecordsLocal(field, from, to, clienteName){
+  STATE.hist.records.forEach(function(r){
+    if(r[field]===from && (!clienteName || r.cliente===clienteName)) r[field]=to;
+  });
+  if(!supabase){
+    var list = loadLocalRecords();
+    list.forEach(function(r){ if(r[field]===from && (!clienteName || r.cliente===clienteName)) r[field]=to; });
+    try{ localStorage.setItem('captura_pozos_local_records', JSON.stringify(list)); }catch(e){}
+  }
+}
+
+function renameCliente(id, nuevo){
+  var c = findCliente(id); if(!c) return Promise.resolve(false);
+  nuevo = String(nuevo||'').trim().replace(/\s+/g,' ');
+  if(!nuevo) return catErr('El nombre no puede quedar vacío');
+  if(nuevo===c.nombre) return Promise.resolve(true);
+  if(CAT.clientes.some(function(o){ return o.id!==id && catNorm(o.nombre)===catNorm(nuevo); })) return catErr('Ya existe un cliente con ese nombre');
+  var viejo = c.nombre;
+  if(!supabase){
+    c.nombre = nuevo; saveLocalCatalog(); renameRecordsLocal('cliente', viejo, nuevo); rebuildCatalogGlobals();
+    return Promise.resolve(true);
+  }
+  return supabase.from('clientes').update({nombre:nuevo}).eq('id', id).then(function(res){
+    if(res.error) return catErr('No se pudo renombrar: '+res.error.message);
+    c.nombre = nuevo; rebuildCatalogGlobals();
+    return supabase.from('registros').update({cliente:nuevo}).eq('cliente', viejo).then(function(r2){
+      if(r2.error) showToast('Cliente renombrado, pero los registros anteriores conservan el nombre "'+viejo+'": '+r2.error.message, 'err');
+      else renameRecordsLocal('cliente', viejo, nuevo);
+      return true;
+    });
+  });
+}
+
+function renamePozo(id, nuevo){
+  var p = findPozo(id); if(!p) return Promise.resolve(false);
+  var c = findCliente(p.cliente_id);
+  nuevo = String(nuevo||'').trim().replace(/\s+/g,' ');
+  if(!nuevo) return catErr('El nombre no puede quedar vacío');
+  if(nuevo===p.nombre) return Promise.resolve(true);
+  if(CAT.pozos.some(function(o){ return o.id!==id && o.cliente_id===p.cliente_id && catNorm(o.nombre)===catNorm(nuevo); })) return catErr('Ese pozo ya existe para este cliente');
+  var viejo = p.nombre;
+  if(!supabase){
+    p.nombre = nuevo; saveLocalCatalog(); renameRecordsLocal('pozo', viejo, nuevo, c && c.nombre); rebuildCatalogGlobals();
+    return Promise.resolve(true);
+  }
+  return supabase.from('pozos').update({nombre:nuevo}).eq('id', id).then(function(res){
+    if(res.error) return catErr('No se pudo renombrar: '+res.error.message);
+    p.nombre = nuevo; rebuildCatalogGlobals();
+    return supabase.from('registros').update({pozo:nuevo}).eq('cliente', c ? c.nombre : '').eq('pozo', viejo).then(function(r2){
+      if(r2.error) showToast('Pozo renombrado, pero los registros anteriores conservan el nombre "'+viejo+'": '+r2.error.message, 'err');
+      else renameRecordsLocal('pozo', viejo, nuevo, c && c.nombre);
+      return true;
+    });
+  });
+}
+
+function toggleActivo(kind, id){
+  var item = kind==='cliente' ? findCliente(id) : findPozo(id);
+  if(!item) return Promise.resolve(false);
+  var val = !item.activo;
+  if(!supabase){
+    item.activo = val; saveLocalCatalog(); rebuildCatalogGlobals();
+    return Promise.resolve(true);
+  }
+  return supabase.from(kind==='cliente'?'clientes':'pozos').update({activo:val}).eq('id', id).then(function(res){
+    if(res.error) return catErr('No se pudo actualizar: '+res.error.message);
+    item.activo = val; rebuildCatalogGlobals(); return true;
+  });
+}
+
+/* Copia el listado incluido en el archivo a las tablas vacías de Supabase */
+function migrateEmbeddedCatalog(){
+  if(!supabase) return Promise.resolve();
+  var emb = DATA.clientesPozos;
+  STATE.cat.busyMsg = 'Migrando catálogo…'; renderAll();
+  return supabase.from('clientes').insert(emb.clientes.map(function(c){ return {nombre:c}; })).select('id,nombre').then(function(res){
+    if(res.error) throw res.error;
+    var idBy = {}; res.data.forEach(function(c){ idBy[c.nombre]=c.id; });
+    var rows = [];
+    emb.clientes.forEach(function(c){ (emb.pozos[c]||[]).forEach(function(p){ rows.push({cliente_id:idBy[c], nombre:p}); }); });
+    return rows.length ? supabase.from('pozos').insert(rows) : {error:null};
+  }).then(function(r){
+    if(r && r.error) throw r.error;
+    showToast('✔ Catálogo migrado', 'ok');
+  }).catch(function(e){ showToast('No se pudo migrar: '+e.message, 'err'); })
+  .then(function(){ STATE.cat.busyMsg=''; return loadCatalog(true); }).then(function(){ renderAll(); });
+}
+
+function renderCatalogo(){
+  var html = '';
+  var cs = STATE.cat;
+  if(supabase && CAT.dbMissing){
+    html += '<div class="banner banner-warn" style="align-items:flex-start;">⚠️ <div style="flex:1;">Las tablas del catálogo aún no existen en Supabase, así que la app está usando el listado incluido en el archivo y <b>no se pueden guardar cambios</b>. Para activar este módulo, ejecuta una sola vez el script <b>catalogo_supabase.sql</b> en Supabase → SQL Editor y recarga la página.</div></div>';
+  } else if(supabase && CAT.source==='empty'){
+    html += '<div class="banner banner-warn">⚠️ <div style="flex:1;">El catálogo en la base de datos está vacío. Cópiale el listado actual de clientes y pozos para empezar a administrarlo.</div>' +
+      '<button data-action="cat-migrate">Migrar listado actual</button></div>';
+  }
+  if(cs.busyMsg) html += '<div class="banner banner-ok">⏳ '+esc(cs.busyMsg)+'</div>';
+  var writable = catWritable();
+  var dis = writable ? '' : ' disabled';
+
+  var clientes = CAT.clientes.slice().sort(catSort);
+  if(!cs.sel || !findCliente(cs.sel)) cs.sel = clientes.length ? clientes[0].id : null;
+
+  html += '<div class="cat-grid">';
+  // --- columna clientes ---
+  html += '<div class="card"><h2>Clientes</h2><p class="sub">Crea, renombra o desactiva clientes. Un cliente inactivo no aparece en la captura, pero su histórico se conserva.</p>';
+  html += '<div class="cat-add"><input id="cat-new-cliente" class="search-box" placeholder="Nuevo cliente…" value="'+esc(cs.newCliente)+'"'+dis+'><button class="btn btn-primary cat-add-btn" data-action="cat-add-cliente"'+dis+'>＋ Agregar</button></div>';
+  html += '<div class="cat-list">';
+  if(clientes.length===0) html += '<div class="empty-note">Sin clientes.</div>';
+  clientes.forEach(function(c){
+    var n = CAT.pozos.filter(function(p){ return p.cliente_id===c.id; }).length;
+    var nAct = CAT.pozos.filter(function(p){ return p.cliente_id===c.id && p.activo; }).length;
+    var editing = cs.editing && cs.editing.kind==='cliente' && cs.editing.id===c.id;
+    html += '<div class="cat-item'+(cs.sel===c.id?' sel':'')+(c.activo?'':' off')+'" data-action="cat-sel" data-id="'+esc(c.id)+'">';
+    if(editing){
+      html += '<input id="cat-edit-input" class="cat-edit" value="'+esc(cs.editValue)+'">' +
+        '<button class="cat-mini ok" data-action="cat-save-edit">Guardar</button><button class="cat-mini" data-action="cat-cancel-edit">✕</button>';
+    } else {
+      html += '<div class="cat-name"><span class="pick-avatar cat-av" style="background:'+colorFor(c.nombre)+'">'+esc(initials(c.nombre))+'</span>' +
+        '<div><div class="nm">'+esc(c.nombre)+'</div><div class="meta">'+nAct+' de '+n+' pozo'+(n!==1?'s':'')+' activos</div></div></div>' +
+        (c.activo?'':'<span class="cat-badge">Inactivo</span>') +
+        (writable ? '<button class="cat-mini" data-action="cat-edit" data-kind="cliente" data-id="'+esc(c.id)+'">Editar</button>' +
+          '<button class="cat-mini" data-action="cat-toggle" data-kind="cliente" data-id="'+esc(c.id)+'">'+(c.activo?'Desactivar':'Activar')+'</button>' : '');
+    }
+    html += '</div>';
+  });
+  html += '</div></div>';
+
+  // --- columna pozos ---
+  var sel = cs.sel ? findCliente(cs.sel) : null;
+  html += '<div class="card">';
+  if(!sel){
+    html += '<h2>Pozos</h2><div class="empty-note">Crea o selecciona un cliente.</div>';
+  } else {
+    var filt = catNorm(cs.pozoFilter);
+    var pozos = CAT.pozos.filter(function(p){ return p.cliente_id===sel.id; }).sort(catSort);
+    var shown = filt ? pozos.filter(function(p){ return catNorm(p.nombre).indexOf(filt)>=0; }) : pozos;
+    html += '<h2>Pozos de '+esc(sel.nombre)+'</h2><p class="sub">'+pozos.length+' pozo'+(pozos.length!==1?'s':'')+'. Un pozo inactivo deja de aparecer en la captura y la importación; su histórico se conserva.</p>';
+    html += '<div class="cat-add"><input id="cat-new-pozo" class="search-box" placeholder="Nuevo pozo para '+esc(sel.nombre)+'…" value="'+esc(cs.newPozo)+'"'+dis+'><button class="btn btn-primary cat-add-btn" data-action="cat-add-pozo"'+dis+'>＋ Agregar</button></div>';
+    if(pozos.length > 6) html += '<input id="cat-pozo-filter" class="search-box" placeholder="Buscar pozo…" value="'+esc(cs.pozoFilter)+'">';
+    html += '<div class="cat-list">';
+    if(shown.length===0) html += '<div class="empty-note">'+(pozos.length? 'Ningún pozo coincide con la búsqueda.' : 'Este cliente aún no tiene pozos.')+'</div>';
+    shown.forEach(function(p){
+      var editing = cs.editing && cs.editing.kind==='pozo' && cs.editing.id===p.id;
+      html += '<div class="cat-item'+(p.activo?'':' off')+'">';
+      if(editing){
+        html += '<input id="cat-edit-input" class="cat-edit" value="'+esc(cs.editValue)+'">' +
+          '<button class="cat-mini ok" data-action="cat-save-edit">Guardar</button><button class="cat-mini" data-action="cat-cancel-edit">✕</button>';
+      } else {
+        html += '<div class="cat-name"><span>🛢️</span><div class="nm">'+esc(p.nombre)+'</div></div>' +
+          (p.activo?'':'<span class="cat-badge">Inactivo</span>') +
+          (writable ? '<button class="cat-mini" data-action="cat-edit" data-kind="pozo" data-id="'+esc(p.id)+'">Editar</button>' +
+            '<button class="cat-mini" data-action="cat-toggle" data-kind="pozo" data-id="'+esc(p.id)+'">'+(p.activo?'Desactivar':'Activar')+'</button>' : '');
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+  html += '</div></div>';
+  if(!supabase) html += '<p class="cat-foot">Modo local: los cambios del catálogo se guardan solo en este equipo.</p>';
+  return html;
+}
+
+function catAfter(p){
+  return Promise.resolve(p).then(function(ok){ renderAll(); return ok; });
+}
+
+function handleCatalogAction(action, el){
+  var cs = STATE.cat;
+  switch(action){
+    case 'cat-sel':
+      if(cs.editing) return true;
+      cs.sel = el.getAttribute('data-id'); cs.pozoFilter=''; renderAll(); return true;
+    case 'cat-add-cliente':
+      catAfter(addCliente(cs.newCliente).then(function(ok){
+        if(ok){ var c = CAT.clientes.find(function(x){ return catNorm(x.nombre)===catNorm(cs.newCliente); }); if(c) cs.sel=c.id; cs.newCliente=''; showToast('✔ Cliente creado', 'ok'); }
+        return ok;
+      })); return true;
+    case 'cat-add-pozo':
+      catAfter(addPozo(cs.sel, cs.newPozo).then(function(ok){ if(ok){ cs.newPozo=''; showToast('✔ Pozo creado', 'ok'); } return ok; })); return true;
+    case 'cat-edit':
+      var kind = el.getAttribute('data-kind'), id = el.getAttribute('data-id');
+      var item = kind==='cliente' ? findCliente(id) : findPozo(id);
+      cs.editing = {kind:kind, id:id}; cs.editValue = item ? item.nombre : '';
+      renderAll();
+      var inp = document.getElementById('cat-edit-input'); if(inp){ inp.focus(); inp.select(); }
+      return true;
+    case 'cat-cancel-edit':
+      cs.editing = null; renderAll(); return true;
+    case 'cat-save-edit':
+      var ed = cs.editing; if(!ed) return true;
+      var fn = ed.kind==='cliente' ? renameCliente : renamePozo;
+      catAfter(fn(ed.id, cs.editValue).then(function(ok){ if(ok){ cs.editing=null; showToast('✔ Nombre actualizado', 'ok'); } return ok; }));
+      return true;
+    case 'cat-toggle':
+      var k = el.getAttribute('data-kind'), tid = el.getAttribute('data-id');
+      var it = k==='cliente' ? findCliente(tid) : findPozo(tid);
+      if(it && it.activo && !confirm('¿Desactivar "'+it.nombre+'"? Dejará de aparecer en la captura y la importación, pero su histórico se conserva. Puedes reactivarlo cuando quieras.')) return true;
+      catAfter(toggleActivo(k, tid)); return true;
+    case 'cat-migrate':
+      migrateEmbeddedCatalog(); return true;
+  }
+  return false;
+}
+
+function attachCatalogEvents(){
+  [['cat-new-cliente','newCliente','cat-add-cliente'],['cat-new-pozo','newPozo','cat-add-pozo'],['cat-edit-input','editValue','cat-save-edit']].forEach(function(cfg){
+    var el = document.getElementById(cfg[0]);
+    if(!el) return;
+    el.addEventListener('input', function(e){ STATE.cat[cfg[1]] = e.target.value; });
+    el.addEventListener('click', function(e){ e.stopPropagation(); });
+    el.addEventListener('keydown', function(e){
+      if(e.key==='Enter'){ e.preventDefault(); handleCatalogAction(cfg[2], el); }
+      if(e.key==='Escape' && cfg[0]==='cat-edit-input'){ STATE.cat.editing=null; renderAll(); }
+    });
+  });
+  var pf = document.getElementById('cat-pozo-filter');
+  if(pf) pf.addEventListener('input', function(e){
+    STATE.cat.pozoFilter = e.target.value; renderAll();
+    var el2 = document.getElementById('cat-pozo-filter'); if(el2){ el2.focus(); el2.setSelectionRange(el2.value.length, el2.value.length); }
+  });
+}
+
+/* ======================================================================
+   MÓDULO: IMPORTACIÓN DE REGISTROS DESDE EXCEL
+   ====================================================================== */
+var IMP_REQUIRED = ['cliente','pozo','fecha'];
+var CALC_IDS = ['ys_yield_stress','pv_plastic_viscosity','yp_yield_point'];
+
+function hdrNorm(s){
+  return String(s===undefined||s===null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+}
+
+/* Diccionario encabezado → campo. Las claves que apuntan a 2 campos distintos se descartan (ambiguas). */
+var IMP_HEADER_MAP = (function(){
+  var exact = {}, loose = {}, amb = {};
+  function addLoose(k, id){ if(!k) return; if(loose[k] && loose[k]!==id) amb[k]=1; else loose[k]=id; }
+  exact['cliente']='cliente'; exact['pozo']='pozo';
+  FIELDS.forEach(function(f){
+    exact[f.label.trim().toLowerCase()] = f.id;
+    exact[f.id.toLowerCase()] = f.id;
+    addLoose(hdrNorm(f.label), f.id);
+    addLoose(hdrNorm(f.label.replace(/\([^)]*\)/g,'')), f.id);
+    addLoose(hdrNorm(f.id.replace(/_/g,' ')), f.id);
+  });
+  Object.keys(amb).forEach(function(k){ delete loose[k]; });
+  return {exact:exact, loose:loose};
+})();
+
+function mapHeader(h){
+  var raw = String(h===undefined||h===null?'':h).trim();
+  if(!raw) return null;
+  var e = IMP_HEADER_MAP.exact[raw.toLowerCase()];
+  if(e) return e;
+  var n = hdrNorm(raw);
+  if(n==='cliente' || n==='clientes') return 'cliente';
+  if(n==='pozo' || n==='pozos' || n==='well') return 'pozo';
+  return IMP_HEADER_MAP.loose[n] || null;
+}
+
+function pad2(n){ return (n<10?'0':'')+n; }
+function validYMD(y,m,d){
+  if(!(y>=1990 && y<=2100 && m>=1 && m<=12 && d>=1)) return null;
+  var dt = new Date(Date.UTC(y,m-1,d));
+  if(dt.getUTCMonth()!==m-1 || dt.getUTCDate()!==d) return null;
+  return y+'-'+pad2(m)+'-'+pad2(d);
+}
+/* Acepta fecha de Excel (número de serie), AAAA-MM-DD, DD/MM/AAAA, DD-MM-AAAA, DD.MM.AA */
+function parseFecha(v){
+  if(v===undefined || v===null || v==='') return null;
+  if(typeof v==='number' && isFinite(v)){
+    if(typeof XLSX!=='undefined' && XLSX.SSF){
+      var dc = XLSX.SSF.parse_date_code(v);
+      if(dc) return validYMD(dc.y, dc.m, dc.d);
+    }
+    return null;
+  }
+  if(v instanceof Date && !isNaN(v)) return validYMD(v.getFullYear(), v.getMonth()+1, v.getDate());
+  var s = String(v).trim().split(/[ T]/)[0];
+  var m = s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
+  if(m) return validYMD(+m[1], +m[2], +m[3]);
+  m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2}|\d{4})$/);
+  if(m){
+    var a = +m[1], b = +m[2], y = +m[3]; if(y<100) y += 2000;
+    if(a<=12 && b>12) return validYMD(y, a, b);   // formato MM/DD
+    return validYMD(y, b, a);                      // formato colombiano DD/MM
+  }
+  return null;
+}
+/* Acepta 10.5, 10,5, 1.234,5, 1,234.5 */
+function parseNumero(v){
+  if(typeof v==='number') return isFinite(v) ? v : NaN;
+  var s = String(v).trim().replace(/\s/g,'');
+  if(s==='') return null;
+  var lc = s.lastIndexOf(','), ld = s.lastIndexOf('.');
+  if(lc>=0 && ld>=0){ s = lc>ld ? s.replace(/\./g,'').replace(',', '.') : s.replace(/,/g,''); }
+  else if(lc>=0){ s = (s.split(',').length===2) ? s.replace(',', '.') : s.replace(/,/g,''); }
+  if(!/^[-+]?\d*\.?\d+(e[-+]?\d+)?$/i.test(s)) return NaN;
+  return parseFloat(s);
+}
+function fmtNum(n){ return String(Math.round(n*1e6)/1e6); }
+
+function recKey(cliente, pozo, fecha){ return catNorm(cliente)+'|'+catNorm(pozo)+'|'+fecha; }
+
+function analyzeImport(aoa, fileName){
+  var imp = STATE.imp;
+  // localizar fila de encabezados: la primera (de las 10 primeras) que contenga Cliente y Pozo
+  var hRow = -1, colMap = null;
+  for(var i=0; i<Math.min(aoa.length, 10); i++){
+    var m = (aoa[i]||[]).map(mapHeader);
+    if(m.indexOf('cliente')>=0 && m.indexOf('pozo')>=0){ hRow = i; colMap = m; break; }
+  }
+  imp.fileName = fileName; imp.result = null;
+  if(hRow<0){
+    imp.fatal = 'No se encontraron las columnas "Cliente" y "Pozo" en las primeras filas del archivo. Usa la plantilla oficial.';
+    imp.rows = []; return;
+  }
+  imp.fatal = '';
+  var headers = aoa[hRow] || [];
+  imp.ignored = [];
+  var seenField = {};
+  colMap.forEach(function(fid, ci){
+    var h = String(headers[ci]===undefined?'':headers[ci]).trim();
+    if(!fid){ if(h) imp.ignored.push(h); return; }
+    if(seenField[fid]){ imp.ignored.push(h+' (columna repetida)'); colMap[ci]=null; return; }
+    seenField[fid]=1;
+  });
+  imp.missingFecha = !seenField.fecha;
+
+  var existing = {};
+  STATE.hist.records.forEach(function(r){ existing[recKey(r.cliente, r.pozo, (r.values||{}).fecha||'')] = 1; });
+  var inFile = {};
+  var clienteByNorm = {}; CLIENTES.forEach(function(c){ clienteByNorm[catNorm(c)] = c; });
+  var inactiveCli = {}; ALL_CLIENTES.forEach(function(c){ if(CLIENTES.indexOf(c)<0) inactiveCli[catNorm(c)] = c; });
+
+  var rows = [];
+  for(var r = hRow+1; r < aoa.length; r++){
+    var line = aoa[r] || [];
+    if(!line.some(function(v){ return v!==null && v!=='' && String(v).trim()!==''; })) continue;
+    var row = {n:r+1, values:{}, errors:[], warnings:[], status:'ok', cliente:'', pozo:''};
+    colMap.forEach(function(fid, ci){
+      if(!fid) return;
+      var v = line[ci];
+      if(v===undefined || v===null || (typeof v==='string' && v.trim()==='')) return;
+      if(fid==='cliente'){ row.clienteRaw = String(v).trim(); return; }
+      if(fid==='pozo'){ row.pozoRaw = String(v).trim(); return; }
+      var f = FIELD_BY_ID[fid];
+      if(f.type==='date'){
+        var d = parseFecha(v);
+        if(!d) row.errors.push(f.label+': fecha no válida ("'+String(v).trim()+'")'); else row.values[fid]=d;
+      } else if(f.type==='number'){
+        var n = parseNumero(v);
+        if(n===null) return;
+        if(isNaN(n)) row.errors.push(f.label+': no es un número ("'+String(v).trim()+'")'); else row.values[fid]=fmtNum(n);
+      } else {
+        row.values[fid] = String(v).trim();
+      }
+    });
+    // cliente y pozo contra catálogo
+    if(!row.clienteRaw) row.errors.push('Falta el cliente');
+    else {
+      var cn = catNorm(row.clienteRaw);
+      if(clienteByNorm[cn]) row.cliente = clienteByNorm[cn];
+      else if(inactiveCli[cn]) row.errors.push('Cliente "'+row.clienteRaw+'" está inactivo');
+      else row.errors.push('Cliente "'+row.clienteRaw+'" no existe en el catálogo');
+    }
+    if(!row.pozoRaw) row.errors.push('Falta el pozo');
+    else if(row.cliente){
+      var pz = (POZOS[row.cliente]||[]).find(function(p){ return catNorm(p)===catNorm(row.pozoRaw); });
+      if(pz) row.pozo = pz;
+      else if((ALL_POZOS[row.cliente]||[]).some(function(p){ return catNorm(p)===catNorm(row.pozoRaw); })) row.errors.push('Pozo "'+row.pozoRaw+'" está inactivo');
+      else row.errors.push('Pozo "'+row.pozoRaw+'" no existe para '+row.cliente);
+    }
+    if(!row.values.fecha && !row.errors.some(function(e){ return e.indexOf('Fecha')===0; })) row.errors.push('Falta la fecha');
+    if(!row.cliente) row.cliente = row.clienteRaw || '';
+    if(!row.pozo) row.pozo = row.pozoRaw || '';
+
+    // cálculos de reología (mismas fórmulas que la captura manual) si vienen vacíos
+    var vv = row.values, P = function(k){ return parseFloat(vv[k]); };
+    if(vv.ys_yield_stress===undefined && !isNaN(P('r6')) && !isNaN(P('r3'))) vv.ys_yield_stress = fmtNum(round2(2*P('r3') - P('r6')));
+    if(vv.pv_plastic_viscosity===undefined && !isNaN(P('r600')) && !isNaN(P('r300'))) vv.pv_plastic_viscosity = fmtNum(round2(P('r600') - P('r300')));
+    if(vv.yp_yield_point===undefined && !isNaN(P('r300')) && !isNaN(P('pv_plastic_viscosity'))) vv.yp_yield_point = fmtNum(round2(P('r300') - P('pv_plastic_viscosity')));
+
+    if(row.errors.length) row.status = 'error';
+    else {
+      var key = recKey(row.cliente, row.pozo, vv.fecha);
+      if(existing[key]){ row.status = 'dup'; row.warnings.push('Ya existe un registro de este pozo en esta fecha'); }
+      else if(inFile[key]){ row.status = 'dup'; row.warnings.push('Repetido en el archivo (fila '+inFile[key]+')'); }
+      else inFile[key] = row.n;
+    }
+    rows.push(row);
+  }
+  imp.rows = rows;
+  imp.showAll = false;
+}
+
+function impCounts(){
+  var c = {ok:0, error:0, dup:0};
+  STATE.imp.rows.forEach(function(r){ c[r.status]++; });
+  return c;
+}
+
+function readImportFile(file){
+  var imp = STATE.imp;
+  if(!file) return;
+  if(typeof XLSX==='undefined'){ showToast('No se pudo cargar la librería de Excel. Revisa tu conexión y recarga.', 'err'); return; }
+  if(!/\.(xlsx|xlsm|xls|csv)$/i.test(file.name)){ showToast('Formato no soportado. Usa .xlsx, .xls o .csv', 'err'); return; }
+  imp.busy = 'Leyendo '+file.name+'…'; renderAll();
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      var wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', raw:false, codepage:65001});
+      var sheetName = wb.SheetNames.find(function(n){ return hdrNorm(n)==='registros'; }) || wb.SheetNames[0];
+      var aoa = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {header:1, raw:true, defval:'', blankrows:false});
+      analyzeImport(aoa, file.name);
+    }catch(err){
+      console.error(err);
+      imp.fatal = 'No se pudo leer el archivo: '+err.message; imp.rows = [];
+    }
+    imp.busy = ''; renderAll();
+  };
+  reader.onerror = function(){ imp.busy=''; showToast('No se pudo leer el archivo', 'err'); renderAll(); };
+  reader.readAsArrayBuffer(file);
+}
+
+function confirmImport(){
+  var imp = STATE.imp;
+  var valid = imp.rows.filter(function(r){ return r.status==='ok'; });
+  if(!valid.length){ showToast('No hay filas válidas para importar', 'err'); return; }
+  var payload = valid.map(function(r){ return {id:slugRandom(), cliente:r.cliente, pozo:r.pozo, data:r.values}; });
+  var CHUNK = 200, saved = 0, failed = 0, lastErr = '';
+  imp.busy = 'Importando 0 de '+payload.length+'…'; renderAll();
+
+  function finish(){
+    imp.result = {saved:saved, failed:failed, err:lastErr, skipped: imp.rows.length - valid.length};
+    imp.rows = []; imp.busy = '';
+    if(supabase) subscribeHistorial(true); else STATE.hist.records = loadLocalRecords();
+    renderAll();
+    showToast(failed ? ('Importación con errores: '+saved+' guardados, '+failed+' fallidos') : ('✔ '+saved+' registros importados'), failed ? 'err' : 'ok');
+  }
+  if(!supabase){
+    payload.forEach(function(p){ saveLocalRecord({id:p.id, cliente:p.cliente, pozo:p.pozo, values:p.data, createdAt:Date.now()}); });
+    saved = payload.length; finish(); return;
+  }
+  function next(i){
+    if(i >= payload.length){ finish(); return; }
+    var part = payload.slice(i, i+CHUNK);
+    supabase.from('registros').insert(part).then(function(res){
+      if(res.error){ failed += part.length; lastErr = res.error.message; }
+      else saved += part.length;
+      imp.busy = 'Importando '+Math.min(i+CHUNK, payload.length)+' de '+payload.length+'…'; renderAll();
+      next(i+CHUNK);
+    }, function(err){ failed += part.length; lastErr = String(err && err.message || err); next(i+CHUNK); });
+  }
+  next(0);
+}
+
+function downloadTemplate(){
+  if(typeof XLSX==='undefined'){ showToast('Librería de Excel no disponible', 'err'); return; }
+  var headers = ['Cliente','Pozo'].concat(FIELDS.map(function(f){ return f.label; }));
+  var ws = XLSX.utils.aoa_to_sheet([headers]);
+  ws['!cols'] = headers.map(function(h){ return {wch: Math.max(12, Math.min(28, h.length+2))}; });
+  ws['!freeze'] = {xSplit:2, ySplit:1};
+  var cat = [['Cliente','Pozo']];
+  CLIENTES.forEach(function(c){ (POZOS[c]||[]).forEach(function(p){ cat.push([c,p]); }); });
+  var ws2 = XLSX.utils.aoa_to_sheet(cat); ws2['!cols'] = [{wch:24},{wch:28}];
+  var ins = [
+    ['Plantilla de importación — Matriz de seguimiento pozos'],
+    [''],
+    ['1. Llena una fila por reporte diario en la hoja "Registros". No cambies los nombres de las columnas.'],
+    ['2. Cliente, Pozo y Fecha son obligatorios. Cliente y Pozo deben escribirse como en la hoja "Catálogo".'],
+    ['3. Fecha: formato DD/MM/AAAA o una celda con formato de fecha de Excel.'],
+    ['4. Valores numéricos: usa punto o coma decimal (10.5 o 10,5). Deja vacías las celdas sin dato.'],
+    ['5. PV, YP y YS se calculan solos a partir de las lecturas R600, R300, R6 y R3 si los dejas vacíos.'],
+    ['6. Un archivo exportado desde la pestaña Registro también se puede volver a importar.'],
+    ['7. Las filas con un pozo y fecha que ya existen en la plataforma se omiten para evitar duplicados.']
+  ];
+  var ws3 = XLSX.utils.aoa_to_sheet(ins); ws3['!cols'] = [{wch:110}];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Registros');
+  XLSX.utils.book_append_sheet(wb, ws2, 'Catálogo');
+  XLSX.utils.book_append_sheet(wb, ws3, 'Instrucciones');
+  var out = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  triggerBrowserDownload(new Blob([out], {type:'application/octet-stream'}), 'plantilla_importacion_registros.xlsx');
+}
+
+function renderImportPanel(){
+  var imp = STATE.imp;
+  var html = '<div class="card imp-card">';
+  html += '<div class="imp-head"><div><h2>⬆ Importar registros desde Excel</h2>' +
+    '<p class="sub">Carga varios reportes diarios a la vez. Se validan antes de guardar.</p></div>' +
+    '<button class="cat-mini" data-action="imp-close">✕ Cerrar</button></div>';
+
+  if(imp.busy){
+    html += '<div class="banner banner-ok">⏳ '+esc(imp.busy)+'</div></div>';
+    return html;
+  }
+  if(imp.result){
+    var r = imp.result;
+    html += '<div class="banner '+(r.failed?'banner-warn':'banner-ok')+'" style="align-items:flex-start;"><div style="flex:1;">' +
+      '<b>'+r.saved+'</b> registro'+(r.saved!==1?'s':'')+' importado'+(r.saved!==1?'s':'')+'.' +
+      (r.skipped ? ' '+r.skipped+' fila'+(r.skipped!==1?'s':'')+' omitida'+(r.skipped!==1?'s':'')+' por errores o duplicados.' : '') +
+      (r.failed ? '<br>'+r.failed+' no se pudieron guardar: '+esc(r.err) : '') +
+      '</div></div>';
+  }
+
+  html += '<div class="imp-steps">' +
+    '<div class="imp-step"><span class="imp-num">1</span><div><b>Descarga la plantilla</b><div class="meta">Incluye las columnas del formulario y el catálogo vigente de clientes y pozos.</div>' +
+      '<button class="btn btn-ghost imp-btn" data-action="imp-template">⬇ Plantilla Excel</button></div></div>' +
+    '<div class="imp-step"><span class="imp-num">2</span><div><b>Selecciona el archivo</b><div class="meta">.xlsx, .xls o .csv. También sirve un archivo exportado desde esta pestaña.</div>' +
+      '<label class="btn btn-primary imp-btn imp-file">📄 Elegir archivo<input type="file" id="imp-file" accept=".xlsx,.xls,.xlsm,.csv"></label></div></div>' +
+  '</div>';
+
+  if(imp.fatal){
+    html += '<div class="banner banner-warn">⚠️ '+esc(imp.fatal)+'</div>';
+  }
+  if(imp.rows && imp.rows.length){
+    var c = impCounts();
+    html += '<div class="imp-file-name">Archivo: <b>'+esc(imp.fileName)+'</b> · '+imp.rows.length+' fila'+(imp.rows.length!==1?'s':'')+' con datos</div>';
+    html += '<div class="kpi-row imp-kpis">' +
+      '<div class="kpi-card"><div class="val">'+c.ok+'</div><div class="lbl">Listas para importar</div></div>' +
+      '<div class="kpi-card"><div class="val" style="color:var(--danger)">'+c.error+'</div><div class="lbl">Con errores</div></div>' +
+      '<div class="kpi-card"><div class="val" style="color:var(--warn)">'+c.dup+'</div><div class="lbl">Duplicadas (se omiten)</div></div>' +
+    '</div>';
+    if(imp.ignored && imp.ignored.length){
+      html += '<p class="imp-note">Columnas no reconocidas (se ignoran): '+imp.ignored.map(esc).join(', ')+'</p>';
+    }
+    var list = imp.rows.slice().sort(function(a,b){
+      var o = {error:0, dup:1, ok:2}; return o[a.status]-o[b.status] || a.n-b.n;
+    });
+    var limit = imp.showAll ? list.length : 50;
+    html += '<div class="imp-table-wrap"><table class="imp-table"><thead><tr><th>Fila</th><th>Estado</th><th>Cliente</th><th>Pozo</th><th>Fecha</th><th>Detalle</th></tr></thead><tbody>';
+    list.slice(0, limit).forEach(function(r){
+      var st = r.status==='ok' ? '<span class="imp-st ok">✔ Lista</span>' : (r.status==='dup' ? '<span class="imp-st dup">Duplicada</span>' : '<span class="imp-st err">✕ Error</span>');
+      var nVals = Object.keys(r.values).length;
+      var det = r.errors.concat(r.warnings).map(esc).join('<br>') || (nVals+' campos con datos');
+      html += '<tr class="'+r.status+'"><td>'+r.n+'</td><td>'+st+'</td><td>'+esc(r.cliente)+'</td><td>'+esc(r.pozo)+'</td><td>'+(r.values.fecha?fmtDate(r.values.fecha):'—')+'</td><td class="det">'+det+'</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    if(list.length > limit) html += '<div style="text-align:center;margin-top:8px;"><button class="cat-mini" data-action="imp-show-all">Ver las '+list.length+' filas</button></div>';
+    html += '<div class="btn-row">' +
+      '<button class="btn btn-ghost" data-action="imp-reset">Cancelar</button>' +
+      '<button class="btn btn-primary" data-action="imp-confirm"'+(c.ok?'':' disabled')+'>Importar '+c.ok+' registro'+(c.ok!==1?'s':'')+'</button>' +
+    '</div>';
+    if(c.error) html += '<p class="imp-note">Las filas con errores no se importan. Corrígelas en el Excel y vuelve a cargar el archivo: las que ya se importaron se detectarán como duplicadas.</p>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function handleImportAction(action, el){
+  var imp = STATE.imp;
+  switch(action){
+    case 'imp-open': imp.open = true; imp.result = null; renderAll(); return true;
+    case 'imp-close': imp.open = false; imp.rows = []; imp.fatal=''; imp.result=null; renderAll(); return true;
+    case 'imp-reset': imp.rows = []; imp.fatal=''; renderAll(); return true;
+    case 'imp-template': downloadTemplate(); return true;
+    case 'imp-show-all': imp.showAll = true; renderAll(); return true;
+    case 'imp-confirm':
+      var c = impCounts();
+      if(!confirm('¿Importar '+c.ok+' registro'+(c.ok!==1?'s':'')+'?'+(c.error+c.dup ? ' Se omitirán '+(c.error+c.dup)+' filas con errores o duplicadas.' : ''))) return true;
+      confirmImport(); return true;
+  }
+  return false;
+}
+
+function attachImportEvents(){
+  var f = document.getElementById('imp-file');
+  if(f) f.addEventListener('change', function(e){ var file = e.target.files && e.target.files[0]; readImportFile(file); });
+}
+
+
 /* ---------------- events ---------------- */
 function attachEvents(){
+  attachCatalogEvents();
+  attachImportEvents();
   ['login-email','login-pass'].forEach(function(id){
     var el = document.getElementById(id);
     if(el) el.addEventListener('keydown', function(e){ if(e.key==='Enter') doLogin(); });
@@ -1417,7 +2180,7 @@ function attachEvents(){
     if(!el) return;
     el.addEventListener('change', function(e){
       STATE.dash[pair[1]] = e.target.value || '';
-      if(pair[1]==='cliente' && STATE.dash.pozo && (POZOS[STATE.dash.cliente]||[]).indexOf(STATE.dash.pozo)<0 && STATE.dash.cliente) STATE.dash.pozo='';
+      if(pair[1]==='cliente' && STATE.dash.pozo && STATE.dash.cliente && filterPozos(STATE.dash.cliente).indexOf(STATE.dash.pozo)<0) STATE.dash.pozo='';
       renderAll();
     });
   });
@@ -1471,12 +2234,18 @@ function updateSectionProgressUI(sec){
 function onAction(e){
   var el = e.currentTarget;
   var action = el.getAttribute('data-action');
+  if(action.indexOf('cat-')===0 || action.indexOf('imp-')===0){
+    if(action!=='cat-sel') e.stopPropagation();
+    if(handleCatalogAction(action, el) || handleImportAction(action, el)) return;
+  }
   switch(action){
     case 'tab':
-      if(el.getAttribute('data-tab')==='dashboard' && !isAdmin()) return;
-      STATE.tab = el.getAttribute('data-tab');
+      var tt = el.getAttribute('data-tab');
+      if((tt==='dashboard' || tt==='catalogo') && !isAdmin()) return;
+      STATE.tab = tt;
       renderAll();
       if((STATE.tab==='historial' || STATE.tab==='dashboard') && supabase) subscribeHistorial();
+      if(STATE.tab==='captura' || STATE.tab==='catalogo') loadCatalog();
       break;
     case 'login':
       doLogin();
@@ -1582,7 +2351,9 @@ document.addEventListener('keydown', function(e){
 });
 
 /* ---------------- init ---------------- */
+(function(){ var e = catalogFromEmbedded(); CAT.clientes = e.clientes; CAT.pozos = e.pozos; rebuildCatalogGlobals(); })();
 if(!supabase){
+  loadCatalog();
   STATE.hist.records = loadLocalRecords();
 }
 renderAll();
