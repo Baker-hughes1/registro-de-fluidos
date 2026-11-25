@@ -430,7 +430,8 @@ var STATE = {
     from: '',
     to: '',
     prop: 'pv_plastic_viscosity',
-    prod: 'sulfatrol'
+    prod: 'sulfatrol',
+    cost: 'costo_diario_productos'
   },
   cat: { sel:null, newCliente:'', newPozo:'', pozoFilter:'', editing:null, editValue:'', busyMsg:'' },
   imp: { open:false, busy:'', fileName:'', rows:[], fatal:'', ignored:[], result:null, showAll:false },
@@ -885,46 +886,86 @@ function findBand(bandArr, md){
   return null;
 }
 
+/* ---------- DASHBOARD: valores reales por pozo (líneas), sin plan ---------- */
+var DASH_COLORS = ['#1a9c7e','#e0a53d','#3b6fd8','#d9534f','#8e5bd6','#2bb3c0','#c77d2e','#6f8f2a','#d6589a','#6b7a8f'];
+var DASH_COST_FIELDS = ['costo_diario_productos','costo_acumulado_productos','cost_bbl_solo_productos','cost_ft_prod'];
+
+function fieldLabel(fid){ var f = FIELD_BY_ID[fid]; return f ? f.label : fid; }
+function shortLabel(fid){ return fieldLabel(fid).replace(/\s*\([^)]*\)\s*$/,''); }
+function fmtUSD(n){ return 'US$ ' + Math.round(n).toLocaleString('es-CO'); }
+
+/* Productos químicos que tienen al menos un dato en los registros filtrados */
+function dashProductsWithData(recs){
+  return FIELDS.filter(function(f){
+    return f.section==='quimicos' && recs.some(function(r){ return num((r.values||{})[f.id])!==null; });
+  }).map(function(f){ return f.id; });
+}
+
+/* Una serie (línea) por pozo, ordenada por profundidad */
+function wellSeries(recs, fid){
+  var byWell = {};
+  recs.forEach(function(r){
+    var v = r.values||{};
+    var md = num(v.hole_depth), x = num(v[fid]);
+    if(md===null || x===null) return;
+    var key = (r.cliente||'') + ' · ' + (r.pozo||'');
+    (byWell[key] = byWell[key] || []).push({x:x, y:md});
+  });
+  return Object.keys(byWell).sort(function(a,b){ return a.localeCompare(b,'es',{numeric:true}); }).map(function(k, i){
+    var c = DASH_COLORS[i % DASH_COLORS.length];
+    return {
+      label: k.split(' · ')[1] || k,
+      fullLabel: k,
+      data: byWell[k].sort(function(a,b){ return a.y-b.y; }),
+      borderColor: c, backgroundColor: c,
+      borderWidth: 2.2, tension: 0.15,
+      pointRadius: 0, pointHoverRadius: 4, pointHitRadius: 8,
+      fill: false, spanGaps: true
+    };
+  });
+}
+
+function chipRow(id, action, fids, active){
+  return '<div class="chip-select" id="'+id+'">' + fids.map(function(fid){
+    return '<button class="chip-btn '+(active===fid?'active':'')+'" data-action="'+action+'" data-fid="'+fid+'">'+esc(shortLabel(fid))+'</button>';
+  }).join('') + '</div>';
+}
+
+function chartCard(icon, title, sub, chips, canvasId, emptyMsg){
+  return '<div class="card">' +
+    '<h2>'+icon+' '+title+'</h2>' +
+    '<p class="sub">'+sub+'</p>' + chips +
+    (emptyMsg ? '<div class="empty-note">'+emptyMsg+'</div>' : '<div class="chart-wrap"><canvas id="'+canvasId+'"></canvas></div>') +
+  '</div>';
+}
+
 function renderDashboard(){
-  var pozos = getAllPozosFlat();
   var recs = getRecordsForDashPozo();
 
   if(typeof Chart === 'undefined'){
-    return '<div class="banner banner-warn">⚠️ No se pudo cargar la librería de gráficos (Chart.js). Revisa tu conexión a internet o si algún bloqueador de contenido está impidiendo cargar scripts de cdn.jsdelivr.net, y recarga la página.</div>';
+    return '<div class="banner banner-warn">⚠️ No se pudo cargar la librería de gráficos (Chart.js). Revisa tu conexión a internet o si algún bloqueador de contenido está impidiendo cargar scripts, y recarga la página.</div>';
   }
 
   // KPIs
-  var total = recs.length;
-  var mwOk=0, mwN=0, propOk=0, propN=0;
-  var lastFecha = null;
+  var total = recs.length, lastFecha = null, costoProd = 0, hayCosto = false, wells = {};
   recs.forEach(function(r){
     var v = r.values||{};
-    var md = num(v.hole_depth);
-    var dens = num(v.density);
-    if(md!==null && dens!==null){
-      var band = findBand(PLAN_DATA.mw_curve.map(function(p){return {md:p.md,min:p.mw,max:p.mw};}), md);
-      // banda de MW: usamos +-0.3 ppg de tolerancia sobre el valor recomendado
-      if(band && band.min!==null){
-        mwN++;
-        if(dens >= band.min-0.3 && dens <= band.min+0.5) mwOk++;
-      }
-    }
-    var pv = num(v[STATE.dash.prop]);
-    if(md!==null && pv!==null){
-      var pband = findBand(PLAN_DATA.propiedades[STATE.dash.prop], md);
-      if(pband && (pband.min!==null || pband.max!==null)){
-        propN++;
-        var okMin = pband.min===null || pv>=pband.min;
-        var okMax = pband.max===null || pv<=pband.max;
-        if(okMin && okMax) propOk++;
-      }
-    }
+    var c = num(v.costo_diario_productos);
+    if(c!==null){ costoProd += c; hayCosto = true; }
+    wells[(r.cliente||'')+'|'+(r.pozo||'')] = 1;
     if(v.fecha && (!lastFecha || v.fecha>lastFecha)) lastFecha = v.fecha;
   });
 
+  // listas de opciones
+  var props = Object.keys(PLAN_DATA.propiedades);
+  if(props.indexOf(STATE.dash.prop)<0) STATE.dash.prop = props[0];
+  var prods = dashProductsWithData(recs);
+  if(prods.length && prods.indexOf(STATE.dash.prod)<0) STATE.dash.prod = prods[0];
+  if(DASH_COST_FIELDS.indexOf(STATE.dash.cost)<0) STATE.dash.cost = DASH_COST_FIELDS[0];
+
   var html = '';
   html += '<div class="banner banner-ok" style="align-items:flex-start;">' +
-    '<span>📊</span><div style="flex:1;">Dashboard basado en la matriz de plan de perforación (CLIA 46) comparado contra los registros del histórico. Usa los filtros para ver la comparación plan vs. real por sección, departamento, cliente, pozo o rango de fechas.</div></div>';
+    '<span>📊</span><div style="flex:1;">Valores reales reportados por pozo según la profundidad. Cada línea es un pozo; usa los filtros para comparar por sección, departamento, cliente, pozo o rango de fechas.</div></div>';
 
   var d = STATE.dash;
   var pozoOpts = filterPozos(d.cliente);
@@ -941,44 +982,18 @@ function renderDashboard(){
 
   html += '<div class="kpi-row">' +
     '<div class="kpi-card"><div class="val">'+total+'</div><div class="lbl">Registros analizados</div></div>' +
-    '<div class="kpi-card"><div class="val">'+(mwN? Math.round(100*mwOk/mwN)+'%':'—')+'</div><div class="lbl">MW dentro de plan</div></div>' +
-    '<div class="kpi-card"><div class="val">'+(propN? Math.round(100*propOk/propN)+'%':'—')+'</div><div class="lbl">'+esc((PLAN_DATA.propiedades_labels[STATE.dash.prop]||'').split(' ')[0])+' dentro de plan</div></div>' +
+    '<div class="kpi-card"><div class="val">'+Object.keys(wells).length+'</div><div class="lbl">Pozos</div></div>' +
+    '<div class="kpi-card"><div class="val" style="font-size:15px;">'+(hayCosto? fmtUSD(costoProd):'—')+'</div><div class="lbl">Costo de productos</div></div>' +
     '<div class="kpi-card"><div class="val" style="font-size:15px;">'+(lastFecha? fmtDate(lastFecha):'—')+'</div><div class="lbl">Último reporte</div></div>' +
   '</div>';
 
-  // --- Chart 1: MW ---
-  html += '<div class="card">' +
-    '<h2>🧪 Peso del Lodo (MW) — Plan vs. Real</h2>' +
-    '<p class="sub">Curva de MW recomendado según programa (línea) vs. densidad real reportada (puntos), por profundidad (MD ft).</p>' +
-    '<div class="chart-wrap"><canvas id="chart-mw"></canvas></div>' +
-    '<div class="legend-note"><span><span class="legend-dot" style="background:#33a67d;"></span>MW Plan</span><span><span class="legend-dot" style="background:#e0a53d;"></span>Densidad Real</span></div>' +
-  '</div>';
+  var noData = total ? '' : 'No hay registros con los filtros seleccionados.';
 
-  // --- Chart 2: Propiedades ---
-  html += '<div class="card">' +
-    '<h2>🔬 Propiedades Reológicas — Plan vs. Real</h2>' +
-    '<p class="sub">Banda de plan (mín-máx) por profundidad vs. valores reales reportados.</p>' +
-    '<div class="chip-select" id="chip-props">' +
-    Object.keys(PLAN_DATA.propiedades).map(function(fid){
-      return '<button class="chip-btn '+(STATE.dash.prop===fid?'active':'')+'" data-action="dash-prop" data-fid="'+fid+'">'+esc(PLAN_DATA.propiedades_labels[fid].split(' ')[0])+'</button>';
-    }).join('') +
-    '</div>' +
-    '<div class="chart-wrap"><canvas id="chart-prop"></canvas></div>' +
-    '<div class="legend-note"><span><span class="legend-dot" style="background:rgba(51,166,125,.35);"></span>Rango de plan</span><span><span class="legend-dot" style="background:#e0a53d;"></span>Real</span></div>' +
-  '</div>';
-
-  // --- Chart 3: Concentraciones ---
-  html += '<div class="card">' +
-    '<h2>🧴 Dosificación de Productos — Plan vs. Real</h2>' +
-    '<p class="sub">Banda de plan (mín-máx, ppb) por profundidad vs. dosificación real reportada.</p>' +
-    '<div class="chip-select" id="chip-prods">' +
-    Object.keys(PLAN_DATA.concentraciones).map(function(fid){
-      return '<button class="chip-btn '+(STATE.dash.prod===fid?'active':'')+'" data-action="dash-prod" data-fid="'+fid+'">'+esc(PLAN_DATA.concentraciones_labels[fid].split(' ')[0])+'</button>';
-    }).join('') +
-    '</div>' +
-    '<div class="chart-wrap"><canvas id="chart-prod"></canvas></div>' +
-    '<div class="legend-note"><span><span class="legend-dot" style="background:rgba(51,166,125,.35);"></span>Rango de plan</span><span><span class="legend-dot" style="background:#e0a53d;"></span>Real</span></div>' +
-  '</div>';
+  html += chartCard('🧪','Peso del Lodo (MW)','Densidad reportada (ppg) por profundidad (MD ft).','','chart-mw', noData);
+  html += chartCard('🔬','Propiedades Reológicas','Valor reportado por profundidad. Elige la propiedad:', chipRow('chip-props','dash-prop',props,STATE.dash.prop),'chart-prop', noData);
+  html += chartCard('🧴','Dosificación de Productos','Dosificación reportada por profundidad. Solo aparecen los productos con datos en los filtros actuales:',
+    prods.length ? chipRow('chip-prods','dash-prod',prods,STATE.dash.prod) : '', 'chart-prod', noData || (prods.length ? '' : 'Ningún registro filtrado tiene dosificación de productos.'));
+  html += chartCard('💵','Costos de Producto','Costo reportado (US$) por profundidad. Elige el indicador:', chipRow('chip-costs','dash-cost',DASH_COST_FIELDS,STATE.dash.cost),'chart-cost', noData);
 
   return html;
 }
@@ -991,123 +1006,50 @@ function chartTheme(){
   };
 }
 
+function depthLineChart(canvasId, key, recs, fid, xTitle, theme, money){
+  var canvas = document.getElementById(canvasId);
+  if(!canvas) return;
+  var series = wellSeries(recs, fid);
+  try{
+    DASH_CHARTS[key] = new Chart(canvas, {
+      type: 'line',
+      data: { datasets: series },
+      options: {
+        responsive:true, maintainAspectRatio:false, indexAxis:'y',
+        interaction:{ mode:'nearest', intersect:false },
+        scales:{
+          x:{ type:'linear', position:'top', title:{display:true, text:xTitle}, grid:{color:theme.grid},
+              ticks: money ? { callback:function(v){ return '$'+Number(v).toLocaleString('es-CO'); } } : {} },
+          y:{ type:'linear', reverse:true, title:{display:true, text:'Profundidad MD (ft)'}, grid:{color:theme.grid} }
+        },
+        plugins:{
+          legend:{ display: series.length>0, position:'bottom', labels:{ boxWidth:18, boxHeight:2, padding:12 } },
+          tooltip:{ callbacks:{
+            title:function(items){ return items.length ? items[0].dataset.fullLabel : ''; },
+            label:function(it){
+              var val = money ? fmtUSD(it.parsed.x) : it.parsed.x.toLocaleString('es-CO');
+              return xTitle+': '+val+'  ·  MD '+it.parsed.y.toLocaleString('es-CO')+' ft';
+            }
+          } }
+        }
+      }
+    });
+  }catch(e){ console.error(canvasId+' error', e); }
+}
+
 function renderDashboardCharts(){
   if(typeof Chart === 'undefined') return;
   var theme = chartTheme();
   Chart.defaults.color = theme.text;
   Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
   Chart.defaults.font.size = 11;
-
+  Object.keys(DASH_CHARTS).forEach(function(k){ try{ DASH_CHARTS[k].destroy(); }catch(e){} });
+  DASH_CHARTS = {};
   var recs = getRecordsForDashPozo();
-
-  // --- MW chart ---
-  var mwCanvas = document.getElementById('chart-mw');
-  if(mwCanvas){
-    var actualDensity = recs.map(function(r){
-      var md = num(r.values.hole_depth), y = num(r.values.density);
-      return (md!==null && y!==null) ? {x:y, y:md} : null;
-    }).filter(Boolean);
-  try{
-    DASH_CHARTS.mw = new Chart(mwCanvas, {
-      type: 'line',
-      data: {
-        datasets: [
-          {
-            type:'line', label:'MW Plan (ppg)',
-            data: PLAN_DATA.mw_curve.map(function(p){return {x:p.mw,y:p.md};}),
-            borderColor:'#33a67d', backgroundColor:'transparent', borderWidth:2.5,
-            stepped:false, pointRadius:0, tension:0
-          },
-          {
-            type:'scatter', label:'Densidad Real (ppg)',
-            data: actualDensity,
-            backgroundColor:'#e0a53d', borderColor:'#e0a53d', pointRadius:3.5
-          }
-        ]
-      },
-      options: {
-        responsive:true, maintainAspectRatio:false, indexAxis:'y',
-        scales:{
-          x:{ type:'linear', position:'top', title:{display:true, text:'MW (ppg)'}, grid:{color:theme.grid} },
-          y:{ type:'linear', reverse:true, title:{display:true, text:'Profundidad MD (ft)'}, grid:{color:theme.grid} }
-        },
-        plugins:{ legend:{display:false} }
-      }
-    });
-  }catch(e){ console.error('chart-mw error', e); }
-  }
-
-  // --- Propiedad chart ---
-  var propCanvas = document.getElementById('chart-prop');
-  if(propCanvas){
-    var band = PLAN_DATA.propiedades[STATE.dash.prop];
-    var fid = STATE.dash.prop;
-    var actualProp = recs.map(function(r){
-      var md = num(r.values.hole_depth), y = num(r.values[fid]);
-      return (md!==null && y!==null) ? {x:y,y:md} : null;
-    }).filter(Boolean);
-  try{
-    DASH_CHARTS.prop = new Chart(propCanvas, {
-      type: 'line',
-      data: {
-        datasets: [
-          { type:'line', label:'Mínimo Plan', data: band.map(function(p){return {x:p.min,y:p.md};}),
-            borderColor:'rgba(51,166,125,.55)', backgroundColor:'rgba(51,166,125,.18)', borderWidth:1.5,
-            stepped:'after', pointRadius:0, fill:false },
-          { type:'line', label:'Máximo Plan', data: band.map(function(p){return {x:p.max,y:p.md};}),
-            borderColor:'rgba(51,166,125,.55)', backgroundColor:'rgba(51,166,125,.18)', borderWidth:1.5,
-            stepped:'after', pointRadius:0, fill:0 },
-          { type:'scatter', label:'Real', data: actualProp,
-            backgroundColor:'#e0a53d', borderColor:'#e0a53d', pointRadius:3.5 }
-        ]
-      },
-      options: {
-        responsive:true, maintainAspectRatio:false, indexAxis:'y',
-        scales:{
-          x:{ type:'linear', position:'top', title:{display:true, text: PLAN_DATA.propiedades_labels[fid]}, grid:{color:theme.grid} },
-          y:{ type:'linear', reverse:true, title:{display:true, text:'Profundidad MD (ft)'}, grid:{color:theme.grid} }
-        },
-        plugins:{ legend:{display:false} }
-      }
-    });
-  }catch(e){ console.error('chart-prop error', e); }
-  }
-
-  // --- Producto chart ---
-  var prodCanvas = document.getElementById('chart-prod');
-  if(prodCanvas){
-    var bandP = PLAN_DATA.concentraciones[STATE.dash.prod];
-    var fidP = STATE.dash.prod;
-    var actualProd = recs.map(function(r){
-      var md = num(r.values.hole_depth), y = num(r.values[fidP]);
-      return (md!==null && y!==null) ? {x:y,y:md} : null;
-    }).filter(Boolean);
-  try{
-    DASH_CHARTS.prod = new Chart(prodCanvas, {
-      type: 'line',
-      data: {
-        datasets: [
-          { type:'line', label:'Mínimo Plan', data: bandP.map(function(p){return {x:p.min,y:p.md};}),
-            borderColor:'rgba(51,166,125,.55)', backgroundColor:'rgba(51,166,125,.18)', borderWidth:1.5,
-            stepped:'after', pointRadius:0, fill:false },
-          { type:'line', label:'Máximo Plan', data: bandP.map(function(p){return {x:p.max,y:p.md};}),
-            borderColor:'rgba(51,166,125,.55)', backgroundColor:'rgba(51,166,125,.18)', borderWidth:1.5,
-            stepped:'after', pointRadius:0, fill:0 },
-          { type:'scatter', label:'Real', data: actualProd,
-            backgroundColor:'#e0a53d', borderColor:'#e0a53d', pointRadius:3.5 }
-        ]
-      },
-      options: {
-        responsive:true, maintainAspectRatio:false, indexAxis:'y',
-        scales:{
-          x:{ type:'linear', position:'top', title:{display:true, text: PLAN_DATA.concentraciones_labels[fidP]}, grid:{color:theme.grid} },
-          y:{ type:'linear', reverse:true, title:{display:true, text:'Profundidad MD (ft)'}, grid:{color:theme.grid} }
-        },
-        plugins:{ legend:{display:false} }
-      }
-    });
-  }catch(e){ console.error('chart-prod error', e); }
-  }
+  depthLineChart('chart-mw', 'mw', recs, 'density', 'MW (ppg)', theme);
+  depthLineChart('chart-prop', 'prop', recs, STATE.dash.prop, fieldLabel(STATE.dash.prop), theme);
+  depthLineChart('chart-prod', 'prod', recs, STATE.dash.prod, fieldLabel(STATE.dash.prod), theme);
+  depthLineChart('chart-cost', 'cost', recs, STATE.dash.cost, fieldLabel(STATE.dash.cost), theme, true);
 }
 
 /* ---------- HISTORIAL TAB ---------- */
@@ -2263,6 +2205,10 @@ function onAction(e){
       break;
     case 'dash-prod':
       STATE.dash.prod = el.getAttribute('data-fid');
+      renderAll();
+      break;
+    case 'dash-cost':
+      STATE.dash.cost = el.getAttribute('data-fid');
       renderAll();
       break;
     case 'goto-step':
